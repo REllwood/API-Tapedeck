@@ -19,6 +19,35 @@ test("draft ingestion removes secret fields and replaces unstable values", async
   assert.equal(cassette.variables.sessionId.value, "session-demo-001");
 });
 
+test("draft ingestion removes secret headers and credentials embedded in values", async () => {
+  const draft = await fixture("travel-search-draft");
+  Object.assign(draft.exchanges[0].request.headers, { "x-auth-token": "leak-header-1", "api-key": "leak-header-2", "x-amz-security-token": "leak-header-3", "x-forwarded-for": "Bearer leak-bearer-value-000000" });
+  Object.assign(draft.exchanges[0].request.body, {
+    privateKey: "leak-body-1",
+    callback: "https://example.test/cb?state=keep&access_token=leak-query-1#id_token=leak-fragment-1",
+    note: "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl and key AKIAABCDEFGHIJKLMNOP"
+  });
+  draft.exchanges[1].response.body.deploy = "-----BEGIN RSA PRIVATE KEY-----\nleak-pem\n-----END RSA PRIVATE KEY-----";
+  const cassette = sanitiseDraft(draft);
+  const serialised = JSON.stringify(cassette);
+  assert.doesNotMatch(serialised, /leak-|eyJhbGciOiJIUzI1NiJ9|AKIAABCDEFGHIJKLMNOP/);
+  const body = cassette.exchanges[0].request.body;
+  assert.equal(body.callback, "https://example.test/cb?state=keep&access_token=REDACTED#id_token=REDACTED");
+  assert.equal(body.note, "jwt REDACTED and key REDACTED");
+  assert.equal(cassette.exchanges[0].request.headers["x-forwarded-for"], "Bearer REDACTED");
+  for (const expected of [
+    "exchange.create-search.request.headers.x-auth-token",
+    "exchange.create-search.request.headers.api-key",
+    "exchange.create-search.request.headers.x-amz-security-token",
+    "exchange.create-search.request.headers.x-forwarded-for (bearer token)",
+    "exchange.create-search.request.body.privateKey",
+    "exchange.create-search.request.body.callback (query parameter access_token)",
+    "exchange.create-search.request.body.note (JSON Web Token)",
+    "exchange.create-search.request.body.note (AWS access key)",
+    "exchange.poll-search-one.response.body.deploy (private key)"
+  ]) assert.ok(cassette.capturePolicy.redactions.includes(expected), expected);
+});
+
 test("reviewed cassette replays a stable sequence with subset body matching", async () => {
   const cassette = parseCassette(await fixture("published-cassette"));
   const engine = new ReplayEngine(cassette);
