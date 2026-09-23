@@ -54,14 +54,19 @@ function redactHeaders(value, path, redactions, { dropVolatile = false } = {}) {
   return result;
 }
 
-function replaceObserved(value, definitions) {
-  if (typeof value === "string") {
-    let result = value;
-    for (const definition of definitions) result = result.replaceAll(definition.observed, `{{${definition.name}}}`);
-    return result;
-  }
-  if (Array.isArray(value)) return value.map((item) => replaceObserved(item, definitions));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceObserved(item, definitions)]));
+function observedReplacement(definitions) {
+  if (definitions.length === 0) return null;
+  const longestFirst = [...definitions].sort((left, right) => right.observed.length - left.observed.length);
+  return {
+    pattern: new RegExp(longestFirst.map((definition) => definition.observed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g"),
+    names: new Map(definitions.map((definition) => [definition.observed, definition.name]))
+  };
+}
+
+function replaceObserved(value, replacement) {
+  if (typeof value === "string") return replacement ? value.replace(replacement.pattern, (observed) => `{{${replacement.names.get(observed)}}}`) : value;
+  if (Array.isArray(value)) return value.map((item) => replaceObserved(item, replacement));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceObserved(item, replacement)]));
   return value;
 }
 
@@ -77,6 +82,9 @@ export function sanitiseDraft(input) {
     if (!["string", "number", "boolean"].includes(typeof value.replayValue) || typeof value.description !== "string" || value.description.length > 240) throw new CassetteError(`draft.variableReplacements[${index}] has invalid replay metadata`);
     return value;
   });
+  if (new Set(definitions.map((definition) => definition.name)).size !== definitions.length) throw new CassetteError("draft.variableReplacements names must be unique");
+  if (new Set(definitions.map((definition) => definition.observed)).size !== definitions.length) throw new CassetteError("draft.variableReplacements observed values must be unique");
+  const replacement = observedReplacement(definitions);
   const redactions = [];
   const exchanges = draft.exchanges.map((exchange, index) => {
     if (!exchange || typeof exchange !== "object" || Array.isArray(exchange)) throw new CassetteError(`draft.exchanges[${index}] is invalid`);
@@ -87,16 +95,16 @@ export function sanitiseDraft(input) {
       name: exchange.name,
       request: {
         method: request.method,
-        path: redactText(replaceObserved(request.path, definitions), `exchange.${exchange.id}.request.path`, redactions),
-        query: redactBody(replaceObserved(request.query ?? {}, definitions), `exchange.${exchange.id}.request.query`, redactions),
-        headers: redactHeaders(replaceObserved(request.headers, definitions), `exchange.${exchange.id}.request.headers`, redactions, { dropVolatile: true }),
-        body: redactBody(replaceObserved(request.body, definitions), `exchange.${exchange.id}.request.body`, redactions),
+        path: redactText(replaceObserved(request.path, replacement), `exchange.${exchange.id}.request.path`, redactions),
+        query: redactBody(replaceObserved(request.query ?? {}, replacement), `exchange.${exchange.id}.request.query`, redactions),
+        headers: redactHeaders(replaceObserved(request.headers, replacement), `exchange.${exchange.id}.request.headers`, redactions, { dropVolatile: true }),
+        body: redactBody(replaceObserved(request.body, replacement), `exchange.${exchange.id}.request.body`, redactions),
         match: exchange.match
       },
       response: {
         status: response.status,
-        headers: redactHeaders(replaceObserved(response.headers, definitions), `exchange.${exchange.id}.response.headers`, redactions),
-        body: redactBody(replaceObserved(response.body, definitions), `exchange.${exchange.id}.response.body`, redactions),
+        headers: redactHeaders(replaceObserved(response.headers, replacement), `exchange.${exchange.id}.response.headers`, redactions),
+        body: redactBody(replaceObserved(response.body, replacement), `exchange.${exchange.id}.response.body`, redactions),
         delay: { mode: "recorded", ms: Math.max(0, Math.min(5_000, Number.isInteger(exchange.durationMs) ? exchange.durationMs : 0)) }
       }
     };
