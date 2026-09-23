@@ -11,6 +11,10 @@ function render(value, variables) {
   return value;
 }
 
+function renderText(values, variables) {
+  return Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value.replace(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g, (_, variable) => String(variables[variable]))]));
+}
+
 export function stable(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -56,8 +60,8 @@ function comparePath(template, actual, variables, differences) {
       differences.push({ field: `path variable ${name}`, expected: variables[name], actual: matched[index + 1], reason: "path segment is not valid percent-encoding" });
       return;
     }
-    if (variables[name] !== undefined && String(variables[name]) !== observed) differences.push({ field: `path variable ${name}`, expected: variables[name], actual: observed, reason: "fixed replay variable differs" });
-    else variables[name] = observed;
+    if (variables[name] === undefined) variables[name] = observed;
+    else if (String(variables[name]) !== observed) differences.push({ field: `path variable ${name}`, expected: variables[name], actual: observed, reason: "fixed replay variable differs" });
   });
 }
 
@@ -66,9 +70,9 @@ export function compareExchange(exchange, request, baseVariables) {
   const differences = [];
   if (exchange.request.method !== request.method) differences.push({ field: "method", expected: exchange.request.method, actual: request.method, reason: "method differs" });
   comparePath(exchange.request.path, request.path, variables, differences);
-  const expectedQuery = render(exchange.request.query, variables);
+  const expectedQuery = renderText(exchange.request.query, variables);
   compareValue(expectedQuery, request.query, exchange.request.match.query, "query", differences);
-  const expectedHeaders = render(exchange.request.headers, variables);
+  const expectedHeaders = renderText(exchange.request.headers, variables);
   for (const [name, value] of Object.entries(expectedHeaders)) {
     if (request.headers[name] !== value) differences.push({ field: `header.${name}`, expected: value, actual: request.headers[name] ?? null, reason: "selected header differs or is missing" });
   }
@@ -135,7 +139,7 @@ export class ReplayEngine {
       cursor: this.cursor,
       exchange: expected,
       variables: comparison.variables,
-      response: render(expected.response, comparison.variables)
+      response: { ...render(expected.response, comparison.variables), headers: renderText(expected.response.headers, comparison.variables) }
     };
     this.pending = prepared;
     return prepared;

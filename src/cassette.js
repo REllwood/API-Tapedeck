@@ -119,6 +119,9 @@ function normaliseExchange(value, index, variables) {
   const match = record(request.match, `${path}.request.match`);
   if (!["exact", "subset"].includes(match.query) || !["exact", "subset", "none"].includes(match.body)) throw new CassetteError(`${path}.request.match is invalid`);
   const query = jsonValue(record(request.query ?? {}, `${path}.request.query`), `${path}.request.query`);
+  for (const [name, item] of Object.entries(query)) {
+    if (typeof item !== "string") throw new CassetteError(`${path}.request.query.${name} must be a string, because query values always arrive as text`);
+  }
   const body = match.body === "none" ? null : jsonValue(request.body, `${path}.request.body`);
   const requestHeaders = headers(request.headers, `${path}.request.headers`);
   if (
