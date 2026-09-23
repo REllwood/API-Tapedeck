@@ -1,6 +1,7 @@
 export const REDACTED = "REDACTED";
 const SECRET_NAME = /token|secret|password|passwd|credential|authorization|cookie|api[_-]?key|access[_-]?key|private[_-]?key/i;
 const TEMPLATE = /^\{\{[A-Za-z][A-Za-z0-9_]*\}\}$/;
+const TEMPLATES = /\{\{[A-Za-z][A-Za-z0-9_]*\}\}/g;
 const QUERY_PARAMETER = /([?&#])([^=&#\s"'<>]+)=([^&#\s"'<>]+)/g;
 const EMBEDDED = [
   { label: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, replace: () => REDACTED },
@@ -36,4 +37,23 @@ export function scrubText(value) {
     });
   }
   return { text, found };
+}
+
+export function isPlaceholder(value) {
+  if (value === null || typeof value === "boolean" || value === "") return true;
+  if (typeof value !== "string" || !(value.includes("{{") || value.includes(REDACTED))) return false;
+  return /^\s*(?:(?:bearer|basic|token)\s*)?$/i.test(value.replaceAll(TEMPLATES, "").replaceAll(REDACTED, ""));
+}
+
+export function literalSecrets(value, path, found = []) {
+  if (typeof value === "string") {
+    if (scrubText(value).found.length > 0) found.push(path);
+  } else if (Array.isArray(value)) value.forEach((item, index) => literalSecrets(item, `${path}[${index}]`, found));
+  else if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (isSecretName(key) && !isPlaceholder(item)) found.push(`${path}.${key}`);
+      else literalSecrets(item, `${path}.${key}`, found);
+    }
+  }
+  return found;
 }

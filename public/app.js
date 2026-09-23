@@ -1,6 +1,6 @@
 const ids = ["load-draft", "sanitise", "review", "run", "mismatch", "cancel", "operation-status", "mode", "cassette-summary", "exchange-list", "review-empty", "review-content", "review-state", "retained-host", "redaction-count", "variable-list", "selected-name", "selected-exchange", "journey-log", "raw-result"];
 const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
-const state = { draft: null, cassette: null, controller: null, log: [] };
+const state = { draft: null, cassette: null, reviewToken: null, controller: null, log: [] };
 const operationButtons = ["load-draft", "sanitise", "review", "run", "mismatch"];
 
 function setStatus(message, kind = "info") {
@@ -117,6 +117,7 @@ elements["load-draft"].addEventListener("click", async () => {
     if (!response.ok) throw new Error(`Fixture request returned ${response.status}`);
     state.draft = await response.json();
     state.cassette = null;
+    state.reviewToken = null;
     setStatus(`Loaded ${state.draft.exchanges.length} synthetic exchanges. Sanitisation is required before review.`);
   } catch (error) { setStatus(error.name === "AbortError" ? "Draft loading cancelled. You can retry safely." : `Draft loading failed: ${error.message}`, error.name === "AbortError" ? "info" : "error"); }
   finally { finishOperation(); }
@@ -128,6 +129,7 @@ elements.sanitise.addEventListener("click", async () => {
   try {
     const result = await jsonRequest("/api/sanitise", { draft: state.draft }, signal);
     state.cassette = result.cassette;
+    state.reviewToken = result.reviewToken;
     renderCassette();
     setStatus(`Sanitisation complete: ${state.cassette.capturePolicy.redactions.length} fields removed. Review is still required.`);
   } catch (error) { setStatus(error.name === "AbortError" ? "Sanitisation cancelled. No cassette was presented as reviewed." : `Sanitisation failed: ${error.message}`, error.name === "AbortError" ? "info" : "error"); }
@@ -138,10 +140,9 @@ elements.review.addEventListener("click", async () => {
   const signal = beginOperation("review", "Loading reviewed replay…");
   setStatus("Applying explicit review acknowledgement and resetting the local replay sequence…");
   try {
-    const reviewed = structuredClone(state.cassette);
-    reviewed.capturePolicy.reviewed = true;
-    await jsonRequest("/api/replay/load", { cassette: reviewed }, signal);
-    state.cassette = reviewed;
+    const result = await jsonRequest("/api/replay/review", { cassette: state.cassette, reviewToken: state.reviewToken }, signal);
+    state.cassette = result.cassette;
+    state.reviewToken = null;
     renderCassette();
     setStatus("Reviewed cassette loaded. Local replay is at exchange 1 of 3; no upstream was contacted.");
   } catch (error) { setStatus(error.name === "AbortError" ? "Replay loading cancelled. The previous replay cassette remains available." : `Replay loading failed: ${error.message}`, error.name === "AbortError" ? "info" : "error"); }

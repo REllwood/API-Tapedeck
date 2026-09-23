@@ -16,6 +16,8 @@ Mocks usually start as one happy-path JSON file and drift away from the real API
 
 - Validates recorded requests and responses, within size limits
 - Removes secret headers and body fields when a recording comes in, along with credentials embedded in values: secret URL parameters, bearer tokens, JSON Web Tokens, private keys and well-known API key formats
+- Refuses any cassette that still carries a literal credential. A deliberate test credential has to go in as a declared variable
+- Marks a recording as reviewed only if it's exactly what this server sanitised
 - Swaps unstable values you declare, like timestamps and IDs, for fixed replay variables
 - Matches requests exactly or by subset
 - Replays fixed or recorded delays
