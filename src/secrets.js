@@ -1,5 +1,8 @@
 export const REDACTED = "REDACTED";
-const SECRET_NAME = /token|secret|password|passwd|credential|authorization|cookie|api[_-]?key|access[_-]?key|private[_-]?key/i;
+const SECRET_WORD = /(?:token|secrets?|passwords?|passwd|credentials?|apikey|accesskey|privatekey|authorization|cookies?)$/;
+const KEY_QUALIFIERS = new Set(["api", "access", "private", "secret", "signing", "encryption", "master", "client"]);
+const CURSOR_QUALIFIERS = new Set(["page", "pagination", "continuation", "cursor", "sync", "next", "resume", "delta"]);
+const DESCRIPTORS = new Set(["type", "count", "used", "limit", "length", "expiry", "expires", "expiration", "ttl", "url", "uri", "endpoint", "lifetime", "policy", "strength", "required", "enabled", "hint", "format", "name"]);
 const TEMPLATE = /^\{\{[A-Za-z][A-Za-z0-9_]*\}\}$/;
 const TEMPLATES = /\{\{[A-Za-z][A-Za-z0-9_]*\}\}/g;
 const QUERY_PARAMETER = /([?&#])([^=&#\s"'<>]+)=([^&#\s"'<>]+)/g;
@@ -19,8 +22,20 @@ function decodeName(value) {
   catch { return value; }
 }
 
+function words(name) {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function isSecretWord(parts, index) {
+  const part = parts[index];
+  if (part === "key") return KEY_QUALIFIERS.has(parts[index - 1]);
+  if (part.endsWith("token") && CURSOR_QUALIFIERS.has(parts[index - 1])) return false;
+  return SECRET_WORD.test(part);
+}
+
 export function isSecretName(name) {
-  return SECRET_NAME.test(name);
+  const parts = words(name);
+  return parts.some((_, index) => isSecretWord(parts, index) && !parts.slice(index + 1).some((later) => DESCRIPTORS.has(later)));
 }
 
 export function scrubText(value) {
