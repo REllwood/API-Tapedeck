@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/REllwood/APITapedeck.git"
+    "url": "git+https://github.com/REllwood/API-Tapedeck.git"
   },
-  "homepage": "https://github.com/REllwood/APITapedeck#readme",
+  "homepage": "https://github.com/REllwood/API-Tapedeck#readme",
   "bugs": {
-    "url": "https://github.com/REllwood/APITapedeck/issues"
+    "url": "https://github.com/REllwood/API-Tapedeck/issues"
   },
   "type": "module",
   "engines": {

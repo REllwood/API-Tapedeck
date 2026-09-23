@@ -26,8 +26,8 @@ Mocks usually start as one happy-path JSON file and drift away from the real API
 Requires Node.js 22 or newer. No `npm install` needed.
 
 ```sh
-git clone https://github.com/REllwood/APITapedeck.git
-cd APITapedeck
+git clone https://github.com/REllwood/API-Tapedeck.git
+cd API-Tapedeck
 npm start
 ```
 
