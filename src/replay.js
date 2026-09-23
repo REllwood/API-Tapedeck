@@ -141,8 +141,12 @@ export class ReplayEngine {
     return prepared;
   }
 
+  isCurrent(token) {
+    return this.pending?.token === token && this.pending.cursor === this.cursor;
+  }
+
   commit(token, request) {
-    if (!this.pending || this.pending.token !== token || this.pending.cursor !== this.cursor) throw new Error("Replay preparation is no longer current");
+    if (!this.isCurrent(token)) throw new Error("Replay preparation is no longer current");
     const completed = this.pending;
     this.#history("matched", request, { exchangeId: completed.exchange.id, exchangeName: completed.exchange.name, delayMs: completed.response.delay.ms, status: completed.response.status });
     this.variables = completed.variables;
