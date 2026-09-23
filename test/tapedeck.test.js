@@ -21,7 +21,7 @@ test("draft ingestion removes secret fields and replaces unstable values", async
 
 test("draft ingestion removes secret headers and credentials embedded in values", async () => {
   const draft = await fixture("travel-search-draft");
-  Object.assign(draft.exchanges[0].request.headers, { "x-auth-token": "leak-header-1", "api-key": "leak-header-2", "x-amz-security-token": "leak-header-3", "x-forwarded-for": "Bearer leak-bearer-value-000000" });
+  Object.assign(draft.exchanges[0].request.headers, { "x-auth-token": "leak-header-1", "api-key": "leak-header-2", "x-amz-security-token": "leak-header-3", "x-debug-context": "Bearer leak-bearer-value-000000" });
   Object.assign(draft.exchanges[0].request.body, {
     privateKey: "leak-body-1",
     callback: "https://example.test/cb?state=keep&access_token=leak-query-1#id_token=leak-fragment-1",
@@ -34,12 +34,12 @@ test("draft ingestion removes secret headers and credentials embedded in values"
   const body = cassette.exchanges[0].request.body;
   assert.equal(body.callback, "https://example.test/cb?state=keep&access_token=REDACTED#id_token=REDACTED");
   assert.equal(body.note, "jwt REDACTED and key REDACTED");
-  assert.equal(cassette.exchanges[0].request.headers["x-forwarded-for"], "Bearer REDACTED");
+  assert.equal(cassette.exchanges[0].request.headers["x-debug-context"], "Bearer REDACTED");
   for (const expected of [
     "exchange.create-search.request.headers.x-auth-token",
     "exchange.create-search.request.headers.api-key",
     "exchange.create-search.request.headers.x-amz-security-token",
-    "exchange.create-search.request.headers.x-forwarded-for (bearer token)",
+    "exchange.create-search.request.headers.x-debug-context (bearer token)",
     "exchange.create-search.request.body.privateKey",
     "exchange.create-search.request.body.callback (query parameter access_token)",
     "exchange.create-search.request.body.note (JSON Web Token)",
@@ -242,4 +242,30 @@ test("numeric variables keep their type in bodies and match as text elsewhere", 
   const numericQuery = await fixture("published-cassette");
   numericQuery.exchanges[1].request.query = { attempt: 1 };
   assert.throws(() => parseCassette(numericQuery), /request\.query\.attempt must be a string/);
+});
+
+test("content-type matches by media type and the parameters the cassette names", async () => {
+  const cassette = parseCassette(await fixture("published-cassette"));
+  const baseVariables = Object.fromEntries(Object.entries(cassette.variables).map(([name, definition]) => [name, definition.value]));
+  const send = (contentType, exchange = cassette.exchanges[0]) => compareExchange(exchange, request("POST", "/sessions", {}, { origin: "MEL", destination: "HBA" }, { "content-type": contentType }), baseVariables).matched;
+  assert.equal(send("application/json; charset=utf-8"), true);
+  assert.equal(send("Application/JSON"), true);
+  assert.equal(send("text/plain"), false);
+
+  const raw = await fixture("published-cassette");
+  raw.exchanges[0].request.headers["content-type"] = "application/json; charset=utf-8";
+  const withCharset = parseCassette(raw).exchanges[0];
+  assert.equal(send("application/json; charset=UTF-8", withCharset), true);
+  assert.equal(send("application/json", withCharset), false);
+});
+
+test("ingestion keeps meaningful request headers and drops transport noise", async () => {
+  const draft = await fixture("travel-search-draft");
+  Object.assign(draft.exchanges[0].request.headers, { host: "travel-api.example.test", "user-agent": "recorder/1.0", traceparent: "00-abc-def-01", "sec-fetch-mode": "cors", "x-forwarded-proto": "https", accept: "application/json", "x-tenant-id": "demo" });
+  const headers = sanitiseDraft(draft).exchanges[0].request.headers;
+  assert.deepEqual(headers, { "content-type": "application/json", accept: "application/json", "x-tenant-id": "demo" });
+
+  const raw = await fixture("published-cassette");
+  raw.exchanges[0].request.headers.host = "travel-api.example.test";
+  assert.throws(() => parseCassette(raw), /request\.headers\.host can never match/);
 });

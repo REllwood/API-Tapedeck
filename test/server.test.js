@@ -119,3 +119,9 @@ test("malformed percent-encoding is answered with a diagnostic, not a server err
   assert.equal(result.status, 409);
   assert.equal(result.body.upstreamContacted, false);
 });
+
+test("a JSON body sent with a charset still matches a plain JSON content type", async (t) => {
+  const send = await start(t);
+  const created = await send("POST", "/replay/sessions", { body: JSON.stringify({ origin: "MEL", destination: "HBA" }), headers: { "content-type": "application/json; charset=utf-8" } });
+  assert.equal(created.status, 202);
+});
