@@ -320,3 +320,20 @@ test("path templates hold at most one variable in each segment", async () => {
   raw.exchanges[0].request.path = "/x/{{sessionId}}/{{generatedAt}}.json";
   assert.equal(parseCassette(raw).exchanges[0].request.path, "/x/{{sessionId}}/{{generatedAt}}.json");
 });
+
+test("observed values are substituted longest first in a single pass", async () => {
+  const overlapping = await fixture("travel-search-draft");
+  overlapping.variableReplacements.unshift({ name: "prefix", observed: "observed-session", replayValue: "prefix-demo", description: "Shorter value that prefixes the session identifier." });
+  overlapping.variableReplacements.push({ name: "idSuffix", observed: "Id", replayValue: "id-demo", description: "Value that also appears inside a variable name." });
+  const cassette = sanitiseDraft(overlapping);
+  assert.equal(cassette.exchanges[1].request.path, "/sessions/{{sessionId}}");
+  assert.equal(cassette.exchanges[0].response.body.sessionId, "{{sessionId}}");
+
+  const duplicateName = await fixture("travel-search-draft");
+  duplicateName.variableReplacements[1].name = "sessionId";
+  assert.throws(() => sanitiseDraft(duplicateName), /names must be unique/);
+
+  const duplicateObserved = await fixture("travel-search-draft");
+  duplicateObserved.variableReplacements[1].observed = duplicateObserved.variableReplacements[0].observed;
+  assert.throws(() => sanitiseDraft(duplicateObserved), /observed values must be unique/);
+});
