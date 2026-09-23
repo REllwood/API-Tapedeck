@@ -50,7 +50,12 @@ function comparePath(template, actual, variables, differences) {
     return;
   }
   names.forEach((name, index) => {
-    const observed = decodeURIComponent(matched[index + 1]);
+    let observed;
+    try { observed = decodeURIComponent(matched[index + 1]); }
+    catch {
+      differences.push({ field: `path variable ${name}`, expected: variables[name], actual: matched[index + 1], reason: "path segment is not valid percent-encoding" });
+      return;
+    }
     if (variables[name] !== undefined && String(variables[name]) !== observed) differences.push({ field: `path variable ${name}`, expected: variables[name], actual: observed, reason: "fixed replay variable differs" });
     else variables[name] = observed;
   });
