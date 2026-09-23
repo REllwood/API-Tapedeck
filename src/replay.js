@@ -139,10 +139,10 @@ export class ReplayEngine {
   commit(token, request) {
     if (!this.pending || this.pending.token !== token || this.pending.cursor !== this.cursor) throw new Error("Replay preparation is no longer current");
     const completed = this.pending;
+    this.#history("matched", request, { exchangeId: completed.exchange.id, exchangeName: completed.exchange.name, delayMs: completed.response.delay.ms, status: completed.response.status });
     this.variables = completed.variables;
     this.cursor += 1;
     this.pending = null;
-    this.#history("matched", request, { exchangeId: completed.exchange.id, exchangeName: completed.exchange.name, delayMs: completed.response.delay.ms, status: completed.response.status });
     return completed.response;
   }
 

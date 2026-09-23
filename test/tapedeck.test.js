@@ -105,6 +105,17 @@ test("retried exchanges are reported as repeats, not as out-of-order requests", 
   assert.deepEqual(afterEnd.diagnostic.differences, []);
 });
 
+test("history records each request at the sequence position it was judged against", async () => {
+  const engine = new ReplayEngine(parseCassette(await fixture("published-cassette")));
+  const input = request("POST", "/sessions", {}, { origin: "MEL", destination: "HBA" }, { "content-type": "application/json" });
+  const prepared = engine.prepare(input);
+  engine.commit(prepared.token, input);
+  engine.prepare(request("GET", "/sessions/wrong", { attempt: "1" }));
+  const history = engine.snapshot().history;
+  assert.deepEqual(history.map((entry) => [entry.outcome, entry.sequencePosition]), [["matched", 1], ["unmatched", 2]]);
+  assert.equal(history[0].detail.exchangeId, "create-search");
+});
+
 test("exact and subset comparisons remain deterministic", async () => {
   const cassette = parseCassette(await fixture("published-cassette"));
   const exchange = cassette.exchanges[0];
