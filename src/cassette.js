@@ -25,6 +25,8 @@ const FORBIDDEN_HEADERS = new Set([
   "x-content-type-options"
 ]);
 
+const INVALID_HEADER_CHARACTER = /[^\t\x20-\x7e\x80-\xff]/;
+
 export class CassetteError extends Error {
   constructor(message) {
     super(message);
@@ -60,6 +62,7 @@ function headers(value, path) {
     if (!/^[a-z0-9!#$%&'*+.^_`|~-]{1,80}$/.test(name)) throw new CassetteError(`${path} contains an invalid header name`);
     if (FORBIDDEN_HEADERS.has(name)) throw new CassetteError(`${path}.${name} is excluded by the published cassette policy`);
     result[name] = string(rawValue, `${path}.${name}`, 4_096);
+    if (INVALID_HEADER_CHARACTER.test(result[name])) throw new CassetteError(`${path}.${name} contains characters that cannot be sent in an HTTP header`);
   }
   return Object.freeze(result);
 }
@@ -92,7 +95,14 @@ function ensureTemplatesKnown(value, variableNames, path) {
   visit(value, path);
 }
 
-function normaliseExchange(value, index, variableNames) {
+function ensureRenderedHeadersValid(value, variables, path) {
+  for (const [name, headerValue] of Object.entries(value)) {
+    const rendered = headerValue.replace(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g, (_, variable) => String(variables[variable].value));
+    if (INVALID_HEADER_CHARACTER.test(rendered)) throw new CassetteError(`${path}.${name} renders characters that cannot be sent in an HTTP header`);
+  }
+}
+
+function normaliseExchange(value, index, variables) {
   const path = `cassette.exchanges[${index}]`;
   const exchange = record(value, path);
   const request = record(exchange.request, `${path}.request`);
@@ -129,7 +139,9 @@ function normaliseExchange(value, index, variableNames) {
     request: Object.freeze({ method, path: requestPath, query: Object.freeze(query), headers: requestHeaders, body, match: Object.freeze({ query: match.query, body: match.body }) }),
     response: Object.freeze({ status: response.status, headers: headers(response.headers, `${path}.response.headers`), body: jsonValue(response.body, `${path}.response.body`), delay: Object.freeze({ mode: delay.mode, ms: delay.ms }) })
   });
-  ensureTemplatesKnown(normalised, variableNames, path);
+  ensureTemplatesKnown(normalised, new Set(Object.keys(variables)), path);
+  ensureRenderedHeadersValid(normalised.request.headers, variables, `${path}.request.headers`);
+  ensureRenderedHeadersValid(normalised.response.headers, variables, `${path}.response.headers`);
   const credentials = [...literalSecrets(normalised.request, `${path}.request`), ...literalSecrets(normalised.response, `${path}.response`)];
   if (credentials.length > 0) throw new CassetteError(`${credentials[0]} carries a literal credential; published cassettes may only carry credentials through declared variables`);
   return normalised;
@@ -149,7 +161,7 @@ export function parseCassette(input) {
   if (!Array.isArray(retainedHosts) || retainedHosts.length > 20 || retainedHosts.some((item) => typeof item !== "string" || item.length > 255)) throw new CassetteError("cassette.capturePolicy.retainedHosts is invalid");
   const normalVariables = variables(cassette.variables);
   if (!Array.isArray(cassette.exchanges) || cassette.exchanges.length > LIMITS.exchanges) throw new CassetteError(`cassette.exchanges must contain at most ${LIMITS.exchanges} records`);
-  const exchanges = cassette.exchanges.map((exchange, index) => normaliseExchange(exchange, index, new Set(Object.keys(normalVariables))));
+  const exchanges = cassette.exchanges.map((exchange, index) => normaliseExchange(exchange, index, normalVariables));
   const ids = new Set();
   for (const exchange of exchanges) {
     if (ids.has(exchange.id)) throw new CassetteError(`cassette.exchanges contains duplicate id ${exchange.id}`);

@@ -139,7 +139,14 @@ async function replayRequest(request, response, url, engine) {
   response.once("close", () => { if (!response.writableEnded) controller.abort(); });
   try {
     await waitForDelay(prepared.response.delay.ms, controller.signal);
-    const result = engine.commit(prepared.token, replayInput);
+    if (!engine.isCurrent(prepared.token)) throw new Error("Replay preparation is no longer current");
+  } catch (error) {
+    engine.cancel(prepared.token);
+    if (!response.writableEnded && !response.destroyed) json(response, 499, { ok: false, error: error.message, upstreamContacted: false });
+    return;
+  }
+  const result = prepared.response;
+  try {
     json(response, result.status, result.body, {
       ...result.headers,
       "x-api-tapedeck-exchange": prepared.exchange.id,
@@ -148,8 +155,9 @@ async function replayRequest(request, response, url, engine) {
     });
   } catch (error) {
     engine.cancel(prepared.token);
-    if (!response.writableEnded && !response.destroyed) json(response, 499, { ok: false, error: error.message, upstreamContacted: false });
+    throw new Error(`Recorded response could not be sent: ${error.message}`);
   }
+  engine.commit(prepared.token, replayInput);
 }
 
 export async function createTapedeckServer() {

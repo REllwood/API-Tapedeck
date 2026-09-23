@@ -206,3 +206,18 @@ test("draft ingestion keeps a secret field only when it is mapped to a declared 
   assert.equal(cassette.capturePolicy.redactions.includes("exchange.create-search.response.body.accessToken"), false);
   assert.equal(cassette.capturePolicy.redactions.length, 4);
 });
+
+test("published cassettes refuse header values that cannot be sent", async () => {
+  const literal = await fixture("published-cassette");
+  literal.exchanges[0].response.headers["x-note"] = "a\r\nx-injected: 1";
+  assert.throws(() => parseCassette(literal), /response\.headers\.x-note contains characters that cannot be sent/);
+
+  const rendered = await fixture("published-cassette");
+  rendered.variables.note = { strategy: "fixed", value: "a\r\nx-injected: 1", description: "Multi-line note." };
+  rendered.exchanges[0].response.headers["x-note"] = "{{note}}";
+  assert.throws(() => parseCassette(rendered), /response\.headers\.x-note renders characters that cannot be sent/);
+
+  rendered.exchanges[0].response.headers = { "content-type": "application/json" };
+  rendered.exchanges[0].response.body.note = "{{note}}";
+  assert.equal(parseCassette(rendered).exchanges[0].response.body.note, "{{note}}");
+});
