@@ -286,3 +286,11 @@ test("secret field detection works on whole words rather than substrings", async
   assert.deepEqual(itinerary.itinerary, { origin: "MEL", destination: "HBA", priceAud: 189, tokensUsed: 12, passwordlessEligible: true, nextPageToken: "page-2" });
   assert.equal(itinerary.next, "https://travel-api.example.test/sessions?page_token=page-2&access_token=REDACTED");
 });
+
+test("parsed cassettes are frozen all the way down", async () => {
+  const cassette = parseCassette(await fixture("published-cassette"));
+  const final = cassette.exchanges[2];
+  assert.ok(Object.isFrozen(final.response.body.itinerary));
+  assert.ok(Object.isFrozen(final.request.query));
+  assert.throws(() => { final.response.body.itinerary.priceAud = 1; }, TypeError);
+});

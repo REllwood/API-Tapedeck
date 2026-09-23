@@ -44,12 +44,20 @@ function string(value, path, maximum = LIMITS.string) {
   return value;
 }
 
+function deepFreeze(value) {
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) deepFreeze(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function jsonValue(value, path) {
   let encoded;
   try { encoded = JSON.stringify(value); }
   catch (error) { throw new CassetteError(`${path} must be JSON-compatible: ${error.message}`); }
   if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > LIMITS.bodyBytes) throw new CassetteError(`${path} exceeds the ${LIMITS.bodyBytes}-byte limit`);
-  return structuredClone(value);
+  return deepFreeze(structuredClone(value));
 }
 
 function headers(value, path) {
