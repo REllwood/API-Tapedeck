@@ -1,6 +1,13 @@
 import { CassetteError, forbiddenHeaders, parseCassette } from "./cassette.js";
 import { isPlaceholder, isSecretName, scrubText } from "./secrets.js";
 
+const VOLATILE_REQUEST_HEADERS = new Set(["host", "user-agent", "accept-encoding", "accept-language", "origin", "referer", "cache-control", "pragma", "if-none-match", "if-modified-since", "priority", "dnt", "upgrade-insecure-requests", "expect", "forwarded", "via", "traceparent", "tracestate", "baggage", "x-request-id", "x-correlation-id", "x-amzn-trace-id", "x-cloud-trace-context"]);
+const VOLATILE_REQUEST_HEADER_PREFIXES = ["sec-", "x-forwarded-", "x-b3-"];
+
+function isVolatileRequestHeader(name) {
+  return VOLATILE_REQUEST_HEADERS.has(name) || VOLATILE_REQUEST_HEADER_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
 function cloneJson(value) {
   try { return structuredClone(value); }
   catch (error) { throw new CassetteError(`Draft must be cloneable JSON: ${error.message}`); }
@@ -36,10 +43,11 @@ function redactBody(value, path, redactions) {
   return value;
 }
 
-function redactHeaders(value, path, redactions) {
+function redactHeaders(value, path, redactions, { dropVolatile = false } = {}) {
   const result = {};
   for (const [rawName, headerValue] of Object.entries(value ?? {})) {
     const name = rawName.toLowerCase();
+    if (dropVolatile && isVolatileRequestHeader(name)) continue;
     if (forbiddenHeaders.has(name) || (isSecretName(name) && !isPlaceholder(headerValue))) redactions.push(`${path}.${name}`);
     else result[name] = redactText(headerValue, `${path}.${name}`, redactions);
   }
@@ -81,7 +89,7 @@ export function sanitiseDraft(input) {
         method: request.method,
         path: redactText(replaceObserved(request.path, definitions), `exchange.${exchange.id}.request.path`, redactions),
         query: redactBody(replaceObserved(request.query ?? {}, definitions), `exchange.${exchange.id}.request.query`, redactions),
-        headers: redactHeaders(replaceObserved(request.headers, definitions), `exchange.${exchange.id}.request.headers`, redactions),
+        headers: redactHeaders(replaceObserved(request.headers, definitions), `exchange.${exchange.id}.request.headers`, redactions, { dropVolatile: true }),
         body: redactBody(replaceObserved(request.body, definitions), `exchange.${exchange.id}.request.body`, redactions),
         match: exchange.match
       },

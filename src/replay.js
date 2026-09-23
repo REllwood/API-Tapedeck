@@ -33,6 +33,27 @@ function compareValue(expected, actual, mode, path, differences) {
   if (stable(expected) !== stable(actual)) differences.push({ field: path, expected, actual, reason: mode === "subset" ? "required subset value differs" : "exact value differs" });
 }
 
+function mediaType(value) {
+  const [type, ...parameters] = value.split(";").map((part) => part.trim());
+  return {
+    type: type.toLowerCase(),
+    parameters: Object.fromEntries(parameters.filter(Boolean).map((parameter) => {
+      const separator = parameter.indexOf("=");
+      const name = (separator === -1 ? parameter : parameter.slice(0, separator)).trim().toLowerCase();
+      const setting = separator === -1 ? "" : parameter.slice(separator + 1).trim().replace(/^"(.*)"$/, "$1");
+      return [name, name === "charset" ? setting.toLowerCase() : setting];
+    }))
+  };
+}
+
+function headerMatches(name, expected, actual) {
+  if (typeof actual !== "string") return false;
+  if (name !== "content-type") return expected === actual;
+  const wanted = mediaType(expected);
+  const received = mediaType(actual);
+  return wanted.type === received.type && Object.entries(wanted.parameters).every(([parameter, setting]) => received.parameters[parameter] === setting);
+}
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -74,7 +95,7 @@ export function compareExchange(exchange, request, baseVariables) {
   compareValue(expectedQuery, request.query, exchange.request.match.query, "query", differences);
   const expectedHeaders = renderText(exchange.request.headers, variables);
   for (const [name, value] of Object.entries(expectedHeaders)) {
-    if (request.headers[name] !== value) differences.push({ field: `header.${name}`, expected: value, actual: request.headers[name] ?? null, reason: "selected header differs or is missing" });
+    if (!headerMatches(name, value, request.headers[name])) differences.push({ field: `header.${name}`, expected: value, actual: request.headers[name] ?? null, reason: "selected header differs or is missing" });
   }
   if (exchange.request.match.body !== "none") compareValue(render(exchange.request.body, variables), request.body, exchange.request.match.body, "body", differences);
   return { matched: differences.length === 0, differences, variables };

@@ -19,7 +19,7 @@ Mocks usually start as one happy-path JSON file and drift away from the real API
 - Refuses any cassette that still carries a literal credential. A deliberate test credential has to go in as a declared variable
 - Marks a recording as reviewed only if it's exactly what this server sanitised
 - Swaps unstable values you declare, like timestamps and IDs, for fixed replay variables
-- Matches requests exactly or by subset
+- Matches requests exactly or by subset. `content-type` is compared by media type, so an added `charset` doesn't cause a miss, and headers such as `host`, `user-agent`, `sec-*` and tracing headers are dropped from recordings
 - Replays fixed or recorded delays
 - Explains mismatches and out-of-order requests field by field, and never contacts the real API
 - Answers only requests addressed to 127.0.0.1, localhost or [::1], and refuses cross-site calls from other web pages

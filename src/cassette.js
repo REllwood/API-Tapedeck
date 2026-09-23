@@ -124,6 +124,7 @@ function normaliseExchange(value, index, variables) {
   }
   const body = match.body === "none" ? null : jsonValue(request.body, `${path}.request.body`);
   const requestHeaders = headers(request.headers, `${path}.request.headers`);
+  if ("host" in requestHeaders) throw new CassetteError(`${path}.request.headers.host can never match a local replay; remove it`);
   if (
     !Number.isInteger(response.status) ||
     response.status < 200 ||
