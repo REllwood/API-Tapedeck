@@ -1,13 +1,20 @@
 import { CassetteError, forbiddenHeaders, parseCassette } from "./cassette.js";
-
-const SECRET_FIELD = /token|secret|password|api[_-]?key|access[_-]?key/i;
+import { isSecretName, scrubText } from "./secrets.js";
 
 function cloneJson(value) {
   try { return structuredClone(value); }
   catch (error) { throw new CassetteError(`Draft must be cloneable JSON: ${error.message}`); }
 }
 
+function redactText(value, path, redactions) {
+  if (typeof value !== "string") return value;
+  const { text, found } = scrubText(value);
+  for (const label of found) redactions.push(`${path} (${label})`);
+  return text;
+}
+
 function redactBody(value, path, redactions) {
+  if (typeof value === "string") return redactText(value, path, redactions);
   if (Array.isArray(value)) {
     if (value.length > 1_000) {
       throw new CassetteError(`${path} exceeds 1,000 array entries`);
@@ -21,7 +28,7 @@ function redactBody(value, path, redactions) {
       throw new CassetteError(`${path} exceeds 1,000 object fields`);
     }
     for (const [key, item] of entries) {
-      if (SECRET_FIELD.test(key)) redactions.push(`${path}.${key}`);
+      if (isSecretName(key)) redactions.push(`${path}.${key}`);
       else result[key] = redactBody(item, `${path}.${key}`, redactions);
     }
     return result;
@@ -33,8 +40,8 @@ function redactHeaders(value, path, redactions) {
   const result = {};
   for (const [rawName, headerValue] of Object.entries(value ?? {})) {
     const name = rawName.toLowerCase();
-    if (forbiddenHeaders.has(name)) redactions.push(`${path}.${name}`);
-    else result[name] = headerValue;
+    if (forbiddenHeaders.has(name) || isSecretName(name)) redactions.push(`${path}.${name}`);
+    else result[name] = redactText(headerValue, `${path}.${name}`, redactions);
   }
   return result;
 }
@@ -72,7 +79,7 @@ export function sanitiseDraft(input) {
       name: exchange.name,
       request: {
         method: request.method,
-        path: replaceObserved(request.path, definitions),
+        path: replaceObserved(redactText(request.path, `exchange.${exchange.id}.request.path`, redactions), definitions),
         query: replaceObserved(redactBody(request.query ?? {}, `exchange.${exchange.id}.request.query`, redactions), definitions),
         headers: replaceObserved(redactHeaders(request.headers, `exchange.${exchange.id}.request.headers`, redactions), definitions),
         body: replaceObserved(redactBody(request.body, `exchange.${exchange.id}.request.body`, redactions), definitions),
