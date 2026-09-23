@@ -1,3 +1,5 @@
+import { literalSecrets } from "./secrets.js";
+
 const LIMITS = Object.freeze({ exchanges: 100, variables: 100, headers: 80, bodyBytes: 128 * 1024, string: 2_048, path: 512, delayMs: 5_000 });
 const FORBIDDEN_HEADERS = new Set([
   "authorization",
@@ -128,6 +130,8 @@ function normaliseExchange(value, index, variableNames) {
     response: Object.freeze({ status: response.status, headers: headers(response.headers, `${path}.response.headers`), body: jsonValue(response.body, `${path}.response.body`), delay: Object.freeze({ mode: delay.mode, ms: delay.ms }) })
   });
   ensureTemplatesKnown(normalised, variableNames, path);
+  const credentials = [...literalSecrets(normalised.request, `${path}.request`), ...literalSecrets(normalised.response, `${path}.response`)];
+  if (credentials.length > 0) throw new CassetteError(`${credentials[0]} carries a literal credential; published cassettes may only carry credentials through declared variables`);
   return normalised;
 }
 

@@ -131,3 +131,33 @@ test("draft body overflow is rejected instead of silently omitted", async () => 
   raw.exchanges[0].request.body.items = Array.from({ length: 1_001 }, (_, index) => index);
   assert.throws(() => sanitiseDraft(raw), /exceeds 1,000 array entries/);
 });
+
+test("published cassettes refuse literal credentials but accept declared variables", async () => {
+  const literalField = await fixture("published-cassette");
+  literalField.exchanges[0].response.body.accessToken = "direct-load-secret";
+  assert.throws(() => parseCassette(literalField), /response\.body\.accessToken carries a literal credential/);
+
+  const embedded = await fixture("published-cassette");
+  embedded.exchanges[1].response.body.note = "Bearer abcdefghijklmnopqrstuvwxyz";
+  assert.throws(() => parseCassette(embedded), /response\.body\.note carries a literal credential/);
+
+  const secretHeader = await fixture("published-cassette");
+  secretHeader.exchanges[0].request.headers["x-auth-token"] = "literal-header-secret";
+  assert.throws(() => parseCassette(secretHeader), /request\.headers\.x-auth-token carries a literal credential/);
+
+  const declared = await fixture("published-cassette");
+  declared.variables.accessToken = { strategy: "fixed", value: "synthetic-replay-token", description: "Deliberate synthetic credential for the client under test." };
+  declared.exchanges[0].response.body.accessToken = "{{accessToken}}";
+  declared.exchanges[0].request.headers["x-auth-token"] = "Bearer {{accessToken}}";
+  assert.equal(parseCassette(declared).exchanges[0].response.body.accessToken, "{{accessToken}}");
+});
+
+test("draft ingestion keeps a secret field only when it is mapped to a declared variable", async () => {
+  const draft = await fixture("travel-search-draft");
+  draft.variableReplacements.push({ name: "accessToken", observed: "synthetic-response-secret", replayValue: "synthetic-replay-token", description: "Deliberate synthetic credential for the client under test." });
+  const cassette = sanitiseDraft(draft);
+  assert.equal(cassette.exchanges[0].response.body.accessToken, "{{accessToken}}");
+  assert.equal(cassette.variables.accessToken.value, "synthetic-replay-token");
+  assert.equal(cassette.capturePolicy.redactions.includes("exchange.create-search.response.body.accessToken"), false);
+  assert.equal(cassette.capturePolicy.redactions.length, 4);
+});

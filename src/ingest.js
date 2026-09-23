@@ -1,5 +1,5 @@
 import { CassetteError, forbiddenHeaders, parseCassette } from "./cassette.js";
-import { isSecretName, scrubText } from "./secrets.js";
+import { isPlaceholder, isSecretName, scrubText } from "./secrets.js";
 
 function cloneJson(value) {
   try { return structuredClone(value); }
@@ -28,7 +28,7 @@ function redactBody(value, path, redactions) {
       throw new CassetteError(`${path} exceeds 1,000 object fields`);
     }
     for (const [key, item] of entries) {
-      if (isSecretName(key)) redactions.push(`${path}.${key}`);
+      if (isSecretName(key) && !isPlaceholder(item)) redactions.push(`${path}.${key}`);
       else result[key] = redactBody(item, `${path}.${key}`, redactions);
     }
     return result;
@@ -40,7 +40,7 @@ function redactHeaders(value, path, redactions) {
   const result = {};
   for (const [rawName, headerValue] of Object.entries(value ?? {})) {
     const name = rawName.toLowerCase();
-    if (forbiddenHeaders.has(name) || isSecretName(name)) redactions.push(`${path}.${name}`);
+    if (forbiddenHeaders.has(name) || (isSecretName(name) && !isPlaceholder(headerValue))) redactions.push(`${path}.${name}`);
     else result[name] = redactText(headerValue, `${path}.${name}`, redactions);
   }
   return result;
@@ -79,16 +79,16 @@ export function sanitiseDraft(input) {
       name: exchange.name,
       request: {
         method: request.method,
-        path: replaceObserved(redactText(request.path, `exchange.${exchange.id}.request.path`, redactions), definitions),
-        query: replaceObserved(redactBody(request.query ?? {}, `exchange.${exchange.id}.request.query`, redactions), definitions),
-        headers: replaceObserved(redactHeaders(request.headers, `exchange.${exchange.id}.request.headers`, redactions), definitions),
-        body: replaceObserved(redactBody(request.body, `exchange.${exchange.id}.request.body`, redactions), definitions),
+        path: redactText(replaceObserved(request.path, definitions), `exchange.${exchange.id}.request.path`, redactions),
+        query: redactBody(replaceObserved(request.query ?? {}, definitions), `exchange.${exchange.id}.request.query`, redactions),
+        headers: redactHeaders(replaceObserved(request.headers, definitions), `exchange.${exchange.id}.request.headers`, redactions),
+        body: redactBody(replaceObserved(request.body, definitions), `exchange.${exchange.id}.request.body`, redactions),
         match: exchange.match
       },
       response: {
         status: response.status,
-        headers: replaceObserved(redactHeaders(response.headers, `exchange.${exchange.id}.response.headers`, redactions), definitions),
-        body: replaceObserved(redactBody(response.body, `exchange.${exchange.id}.response.body`, redactions), definitions),
+        headers: redactHeaders(replaceObserved(response.headers, definitions), `exchange.${exchange.id}.response.headers`, redactions),
+        body: redactBody(replaceObserved(response.body, definitions), `exchange.${exchange.id}.response.body`, redactions),
         delay: { mode: "recorded", ms: Math.max(0, Math.min(5_000, Number.isInteger(exchange.durationMs) ? exchange.durationMs : 0)) }
       }
     };

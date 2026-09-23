@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { CassetteError, forbiddenHeaders, parseCassette } from "./cassette.js";
 import { sanitiseDraft } from "./ingest.js";
-import { ReplayEngine, waitForDelay } from "./replay.js";
+import { ReplayEngine, stable, waitForDelay } from "./replay.js";
 
 const PUBLIC = new Map([
   ["/", new URL("../public/index.html", import.meta.url)],
@@ -125,6 +126,8 @@ async function replayRequest(request, response, url, engine) {
 export async function createTapedeckServer() {
   const published = parseCassette(await fixture(CASSETTE_URL));
   const engine = new ReplayEngine(published);
+  const reviewKey = randomBytes(32);
+  const reviewToken = (cassette) => createHmac("sha256", reviewKey).update(stable(cassette)).digest("base64url");
   const server = createServer(async (request, response) => {
     response.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -145,7 +148,20 @@ export async function createTapedeckServer() {
       }
       if (request.method === "POST" && url.pathname === "/api/sanitise") {
         const body = await readJson(request);
-        json(response, 200, { ok: true, cassette: sanitiseDraft(body.draft ?? body) });
+        const cassette = sanitiseDraft(body.draft ?? body);
+        json(response, 200, { ok: true, cassette, reviewToken: reviewToken(cassette) });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/replay/review") {
+        const body = await readJson(request);
+        const cassette = parseCassette(body.cassette);
+        if (cassette.capturePolicy.reviewed) throw new CassetteError("Cassette is already marked reviewed; load it through /api/replay/load");
+        const expected = Buffer.from(reviewToken(cassette));
+        const supplied = Buffer.from(typeof body.reviewToken === "string" ? body.reviewToken : "");
+        if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new CassetteError("Cassette differs from the one this server sanitised; sanitise it again before review");
+        const reviewed = parseCassette({ ...cassette, capturePolicy: { ...cassette.capturePolicy, reviewed: true } });
+        engine.load(reviewed);
+        json(response, 200, { ok: true, cassette: reviewed, state: engine.snapshot() });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/replay/load") {
