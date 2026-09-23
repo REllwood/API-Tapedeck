@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { CassetteError, parseCassette } from "../src/cassette.js";
 import { sanitiseDraft } from "../src/ingest.js";
-import { isSecretName } from "../src/secrets.js";
+import { isSecretName, scrubText } from "../src/secrets.js";
 import { compareExchange, ReplayEngine, waitForDelay } from "../src/replay.js";
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -293,4 +293,19 @@ test("parsed cassettes are frozen all the way down", async () => {
   assert.ok(Object.isFrozen(final.response.body.itinerary));
   assert.ok(Object.isFrozen(final.request.query));
   assert.throws(() => { final.response.body.itinerary.priceAud = 1; }, TypeError);
+});
+
+test("credential scanning handles nested URLs and unterminated keys", () => {
+  assert.equal(scrubText("https://a.test/cb?next=https://b.test/?access_token=leak").text, "https://a.test/cb?next=https://b.test/?access_token=REDACTED");
+  assert.equal(scrubText("key: -----BEGIN PRIVATE KEY-----\nMIIE-truncated").text, "key: REDACTED");
+  assert.equal(scrubText("?token_type=Bearer&access_token=abc==&state=keep").text, "?token_type=Bearer&access_token=REDACTED&state=keep");
+});
+
+test("credential scanning stays fast on hostile input at the body size limit", () => {
+  const size = 128 * 1024;
+  for (const text of ["?a".repeat(size / 2), "-eyJ".repeat(size / 4), "-----BEGIN RSA PRIVATE KEY-----".repeat(size / 31), "xoxb-".repeat(size / 5)]) {
+    const started = performance.now();
+    scrubText(text);
+    assert.ok(performance.now() - started < 2_000, `${text.slice(0, 12)}… took ${Math.round(performance.now() - started)} ms`);
+  }
 });
