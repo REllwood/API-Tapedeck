@@ -22,6 +22,7 @@ Mocks usually start as one happy-path JSON file and drift away from the real API
 - Matches requests exactly or by subset
 - Replays fixed or recorded delays
 - Explains mismatches and out-of-order requests field by field, and never contacts the real API
+- Answers only requests addressed to 127.0.0.1, localhost or [::1], and refuses cross-site calls from other web pages
 
 ## Quick start
 

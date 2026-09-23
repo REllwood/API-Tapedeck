@@ -17,6 +17,15 @@ const PUBLIC = new Map([
 const DRAFT_URL = new URL("../fixtures/travel-search-draft.json", import.meta.url);
 const CASSETTE_URL = new URL("../fixtures/published-cassette.json", import.meta.url);
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
+const LOOPBACK_AUTHORITY = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?$/;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
 
 function send(response, status, type, body, extraHeaders = {}) {
   const content = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -52,8 +61,28 @@ function readBounded(request, maximum) {
   });
 }
 
+function isJsonRequest(request) {
+  return (request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase() === "application/json";
+}
+
+function isLoopbackAuthority(value, port) {
+  const match = LOOPBACK_AUTHORITY.exec(value);
+  return match !== null && (port === undefined || Number(match[1] ?? 80) === port);
+}
+
+function refusedSource(request, pathname) {
+  const host = (request.headers.host ?? "").toLowerCase();
+  if (!isLoopbackAuthority(host, request.socket.localPort)) return "Requests must address this server as 127.0.0.1, localhost or [::1]";
+  if (!pathname.startsWith("/api/") && !pathname.startsWith("/replay/")) return null;
+  const origin = request.headers.origin?.toLowerCase();
+  if (origin === undefined) return request.headers["sec-fetch-site"] === "cross-site" ? "Cross-site requests are refused" : null;
+  if (pathname.startsWith("/api/")) return origin === `http://${host}` ? null : "Cross-origin API requests are refused";
+  return origin.startsWith("http://") && isLoopbackAuthority(origin.slice("http://".length)) ? null : "Replay requests from non-loopback origins are refused";
+}
+
 async function readJson(request, maximum = 1024 * 1024) {
   const body = await readBounded(request, maximum);
+  if (body.length > 0 && !isJsonRequest(request)) throw new HttpError(415, "API request bodies must be sent as application/json");
   try {
     const value = JSON.parse(body || "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("body must be an object");
@@ -82,7 +111,7 @@ async function replayRequest(request, response, url, engine) {
   if (!["GET", "HEAD"].includes(request.method ?? "GET")) {
     const raw = await readBounded(request, 128 * 1024);
     if (raw.length > 0) {
-      if (!(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) throw new CassetteError("Version 0.1 replay accepts JSON request bodies only");
+      if (!isJsonRequest(request)) throw new CassetteError("Version 0.1 replay accepts JSON request bodies only");
       try { body = JSON.parse(raw); }
       catch (error) { throw new CassetteError(`Replay body is not valid JSON: ${error.message}`); }
     }
@@ -131,6 +160,11 @@ export async function createTapedeckServer() {
   const server = createServer(async (request, response) => {
     response.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const refusal = refusedSource(request, url.pathname);
+    if (refusal) {
+      json(response, 403, { ok: false, error: refusal, upstreamContacted: false });
+      return;
+    }
     try {
       if (request.method === "GET" && PUBLIC.has(url.pathname)) {
         const file = PUBLIC.get(url.pathname);
@@ -184,7 +218,8 @@ export async function createTapedeckServer() {
       }
       json(response, 404, { ok: false, error: "Route not found" });
     } catch (error) {
-      if (!response.writableEnded) json(response, error instanceof CassetteError ? 400 : 500, { ok: false, error: error.message, upstreamContacted: false });
+      const status = error instanceof HttpError ? error.status : error instanceof CassetteError ? 400 : 500;
+      if (!response.writableEnded) json(response, status, { ok: false, error: error.message, upstreamContacted: false });
     }
   });
   return server;
