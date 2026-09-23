@@ -125,3 +125,35 @@ test("a JSON body sent with a charset still matches a plain JSON content type", 
   const created = await send("POST", "/replay/sessions", { body: JSON.stringify({ origin: "MEL", destination: "HBA" }), headers: { "content-type": "application/json; charset=utf-8" } });
   assert.equal(created.status, 202);
 });
+
+test("oversized request bodies are refused with 413", async (t) => {
+  const send = await start(t);
+  const result = await send("POST", "/api/replay/reset", { body: JSON.stringify({ padding: "x".repeat(2_048) }), headers: { "content-type": "application/json" } });
+  assert.equal(result.status, 413);
+  assert.match(result.body.error, /exceeds 1024 bytes/);
+});
+
+test("a reset during a deliberate delay answers 409 and leaves the replay at the start", async (t) => {
+  const send = await start(t);
+  const pending = send("POST", "/replay/sessions", { body: { origin: "MEL", destination: "HBA" } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal((await send("POST", "/api/replay/reset")).status, 200);
+  const interrupted = await pending;
+  assert.equal(interrupted.status, 409);
+  assert.match(interrupted.body.error, /reset or reloaded during the deliberate delay/);
+  assert.equal((await send("GET", "/api/replay/state")).body.state.cursor, 0);
+});
+
+test("a client that disconnects during a delay does not consume the exchange", async (t) => {
+  const send = await start(t);
+  const abandoned = httpRequest({ host: "127.0.0.1", port: send.port, method: "POST", path: "/replay/sessions", agent: false, headers: { "content-type": "application/json" } });
+  abandoned.on("error", () => {});
+  abandoned.end(JSON.stringify({ origin: "MEL", destination: "HBA" }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  abandoned.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const state = (await send("GET", "/api/replay/state")).body.state;
+  assert.equal(state.cursor, 0);
+  assert.equal(state.activeDelay, null);
+  assert.equal((await send("POST", "/replay/sessions", { body: { origin: "MEL", destination: "HBA" } })).status, 202);
+});

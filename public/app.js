@@ -1,4 +1,4 @@
-const ids = ["load-draft", "sanitise", "review", "run", "mismatch", "cancel", "operation-status", "mode", "cassette-summary", "exchange-list", "review-empty", "review-content", "review-state", "retained-host", "redaction-count", "variable-list", "selected-name", "selected-exchange", "journey-log", "raw-result"];
+const ids = ["load-draft", "sanitise", "review", "run", "mismatch", "cancel", "operation-status", "cassette-summary", "exchange-list", "review-empty", "review-content", "review-state", "retained-host", "redaction-count", "variable-list", "selected-name", "selected-exchange", "journey-log", "raw-result"];
 const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
 const state = { draft: null, cassette: null, reviewToken: null, controller: null, log: [] };
 const operationButtons = ["load-draft", "sanitise", "review", "run", "mismatch"];
@@ -99,7 +99,8 @@ function addLog(title, detail, raw) {
 }
 
 async function replayFetch(path, options, label, signal) {
-  const exchange = state.cassette?.exchanges[state.log.length];
+  const loaded = state.cassette?.capturePolicy.reviewed ? state.cassette : null;
+  const exchange = loaded?.exchanges[state.log.length];
   const delay = exchange?.response.delay.ms;
   setStatus(`${label}${delay !== undefined ? `; intentionally waiting ${delay} ms before the cassette response…` : "…"}`);
   const response = await fetch(path, { ...options, signal });
@@ -144,7 +145,7 @@ elements.review.addEventListener("click", async () => {
     state.cassette = result.cassette;
     state.reviewToken = null;
     renderCassette();
-    setStatus("Reviewed cassette loaded. Local replay is at exchange 1 of 3; no upstream was contacted.");
+    setStatus(`Reviewed cassette loaded. Local replay is at exchange 1 of ${state.cassette.exchanges.length}; no upstream was contacted.`);
   } catch (error) { setStatus(error.name === "AbortError" ? "Replay loading cancelled. The previous replay cassette remains available." : `Replay loading failed: ${error.message}`, error.name === "AbortError" ? "info" : "error"); }
   finally { finishOperation(); }
 });
@@ -152,6 +153,7 @@ elements.review.addEventListener("click", async () => {
 elements.run.addEventListener("click", async () => {
   const signal = beginOperation("run", "Replaying journey…");
   state.log = [];
+  elements["journey-log"].replaceChildren();
   setStatus("Resetting the local cassette before replay…");
   try {
     await jsonRequest("/api/replay/reset", {}, signal);
@@ -168,6 +170,7 @@ elements.run.addEventListener("click", async () => {
 elements.mismatch.addEventListener("click", async () => {
   const signal = beginOperation("mismatch", "Comparing mismatch…");
   state.log = [];
+  elements["journey-log"].replaceChildren();
   setStatus("Resetting the cassette, then comparing a deliberately out-of-order request…");
   try {
     await jsonRequest("/api/replay/reset", {}, signal);

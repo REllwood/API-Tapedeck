@@ -50,7 +50,7 @@ v0.1 replays reviewed JSON cassettes. It doesn't record live traffic, proxy requ
 ## Development
 
 ```sh
-npm test        # cassette, ingest and replay tests
+npm test        # cassette, ingest, replay and HTTP server tests
 npm run check   # tests plus syntax checks
 ```
 

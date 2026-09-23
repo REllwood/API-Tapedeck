@@ -45,18 +45,19 @@ function json(response, status, value, extraHeaders = {}) {
 
 function readBounded(request, maximum) {
   return new Promise((resolve, reject) => {
-    let body = "";
-    let exceeded = false;
-    request.setEncoding("utf8");
+    const chunks = [];
+    let size = 0;
     request.on("data", (chunk) => {
-      if (exceeded) return;
-      body += chunk;
-      if (Buffer.byteLength(body, "utf8") > maximum) {
-        exceeded = true;
-        body = "";
+      size += chunk.length;
+      if (size <= maximum) {
+        chunks.push(chunk);
+        return;
       }
+      request.removeAllListeners("data");
+      request.pause();
+      reject(new HttpError(413, `Request body exceeds ${maximum} bytes`));
     });
-    request.on("end", () => exceeded ? reject(new CassetteError(`Request body exceeds ${maximum} bytes`)) : resolve(body));
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
   });
 }
@@ -135,14 +136,15 @@ async function replayRequest(request, response, url, engine) {
     return;
   }
   const controller = new AbortController();
-  request.once("aborted", () => controller.abort());
   response.once("close", () => { if (!response.writableEnded) controller.abort(); });
   try {
     await waitForDelay(prepared.response.delay.ms, controller.signal);
-    if (!engine.isCurrent(prepared.token)) throw new Error("Replay preparation is no longer current");
-  } catch (error) {
+  } catch {
     engine.cancel(prepared.token);
-    if (!response.writableEnded && !response.destroyed) json(response, 499, { ok: false, error: error.message, upstreamContacted: false });
+    return;
+  }
+  if (!engine.isCurrent(prepared.token)) {
+    json(response, 409, { ok: false, error: "The replay was reset or reloaded during the deliberate delay", upstreamContacted: false });
     return;
   }
   const result = prepared.response;
@@ -227,7 +229,7 @@ export async function createTapedeckServer() {
       json(response, 404, { ok: false, error: "Route not found" });
     } catch (error) {
       const status = error instanceof HttpError ? error.status : error instanceof CassetteError ? 400 : 500;
-      if (!response.writableEnded) json(response, status, { ok: false, error: error.message, upstreamContacted: false });
+      if (!response.writableEnded) json(response, status, { ok: false, error: error.message, upstreamContacted: false }, status === 413 ? { connection: "close" } : {});
     }
   });
   return server;
