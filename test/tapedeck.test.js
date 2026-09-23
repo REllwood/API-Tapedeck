@@ -221,3 +221,25 @@ test("published cassettes refuse header values that cannot be sent", async () =>
   rendered.exchanges[0].response.body.note = "{{note}}";
   assert.equal(parseCassette(rendered).exchanges[0].response.body.note, "{{note}}");
 });
+
+test("numeric variables keep their type in bodies and match as text elsewhere", async () => {
+  const raw = await fixture("published-cassette");
+  raw.variables.itemId = { strategy: "fixed", value: 42, description: "Numeric item identifier." };
+  raw.variables.page = { strategy: "fixed", value: 1, description: "Numeric page number." };
+  Object.assign(raw.exchanges[0].request, { path: "/items/{{itemId}}", query: { page: "{{page}}" } });
+  raw.exchanges[0].request.headers["x-page"] = "{{page}}";
+  raw.exchanges[0].response.headers["x-item"] = "{{itemId}}";
+  raw.exchanges[0].response.body.itemId = "{{itemId}}";
+  const engine = new ReplayEngine(parseCassette(raw));
+  const input = request("POST", "/items/42", { page: "1" }, { origin: "MEL", destination: "HBA" }, { "content-type": "application/json", "x-page": "1" });
+  const prepared = engine.prepare(input);
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.diagnostic));
+  const response = engine.commit(prepared.token, input);
+  assert.equal(response.body.itemId, 42);
+  assert.equal(response.headers["x-item"], "42");
+  assert.equal(engine.variables.itemId, 42);
+
+  const numericQuery = await fixture("published-cassette");
+  numericQuery.exchanges[1].request.query = { attempt: 1 };
+  assert.throws(() => parseCassette(numericQuery), /request\.query\.attempt must be a string/);
+});
