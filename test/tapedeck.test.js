@@ -309,3 +309,14 @@ test("credential scanning stays fast on hostile input at the body size limit", (
     assert.ok(performance.now() - started < 2_000, `${text.slice(0, 12)}… took ${Math.round(performance.now() - started)} ms`);
   }
 });
+
+test("path templates hold at most one variable in each segment", async () => {
+  for (const template of ["/x/{{sessionId}}{{generatedAt}}", "/x/{{sessionId}}-{{generatedAt}}"]) {
+    const raw = await fixture("published-cassette");
+    raw.exchanges[0].request.path = template;
+    assert.throws(() => parseCassette(raw), /at most one variable in each path segment/, template);
+  }
+  const raw = await fixture("published-cassette");
+  raw.exchanges[0].request.path = "/x/{{sessionId}}/{{generatedAt}}.json";
+  assert.equal(parseCassette(raw).exchanges[0].request.path, "/x/{{sessionId}}/{{generatedAt}}.json");
+});

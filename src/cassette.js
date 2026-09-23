@@ -124,6 +124,7 @@ function normaliseExchange(value, index, variables) {
   }
   const requestPath = string(request.path, `${path}.request.path`, LIMITS.path);
   if (!requestPath.startsWith("/") || requestPath.includes("?") || requestPath.includes("#")) throw new CassetteError(`${path}.request.path must be an absolute path without query or fragment`);
+  if (requestPath.split("/").some((segment) => (segment.match(/\{\{/g) ?? []).length > 1)) throw new CassetteError(`${path}.request.path may hold at most one variable in each path segment`);
   const match = record(request.match, `${path}.request.match`);
   if (!["exact", "subset"].includes(match.query) || !["exact", "subset", "none"].includes(match.body)) throw new CassetteError(`${path}.request.match is invalid`);
   const query = jsonValue(record(request.query ?? {}, `${path}.request.query`), `${path}.request.query`);
