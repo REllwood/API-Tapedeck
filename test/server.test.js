@@ -112,3 +112,10 @@ test("accepts same-origin API calls and loopback replay origins", async (t) => {
   const replay = await send("POST", "/replay/sessions", { body: { origin: "MEL", destination: "HBA" }, headers: { origin: "http://localhost:5173" } });
   assert.equal(replay.status, 202);
 });
+
+test("malformed percent-encoding is answered with a diagnostic, not a server error", async (t) => {
+  const send = await start(t);
+  const result = await send("GET", "/replay/sessions/%E0%A4%A?attempt=1");
+  assert.equal(result.status, 409);
+  assert.equal(result.body.upstreamContacted, false);
+});

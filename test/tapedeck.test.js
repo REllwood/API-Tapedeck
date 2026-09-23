@@ -116,6 +116,14 @@ test("history records each request at the sequence position it was judged agains
   assert.equal(history[0].detail.exchangeId, "create-search");
 });
 
+test("malformed percent-encoding in a path variable is a diagnosed mismatch", async () => {
+  const engine = new ReplayEngine(parseCassette(await fixture("published-cassette")));
+  const result = engine.prepare(request("GET", "/sessions/%E0%A4%A", { attempt: "1" }));
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+  assert.ok(result.diagnostic.nearest.differences.some((difference) => difference.reason === "path segment is not valid percent-encoding"));
+});
+
 test("exact and subset comparisons remain deterministic", async () => {
   const cassette = parseCassette(await fixture("published-cassette"));
   const exchange = cassette.exchanges[0];
