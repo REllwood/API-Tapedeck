@@ -5,10 +5,10 @@ const CURSOR_QUALIFIERS = new Set(["page", "pagination", "continuation", "cursor
 const DESCRIPTORS = new Set(["type", "count", "used", "limit", "length", "expiry", "expires", "expiration", "ttl", "url", "uri", "endpoint", "lifetime", "policy", "strength", "required", "enabled", "hint", "format", "name"]);
 const TEMPLATE = /^\{\{[A-Za-z][A-Za-z0-9_]*\}\}$/;
 const TEMPLATES = /\{\{[A-Za-z][A-Za-z0-9_]*\}\}/g;
-const QUERY_PARAMETER = /([?&#])([^=&#\s"'<>]+)=([^&#\s"'<>]+)/g;
+const QUERY_PARAMETER = /([?&#])([^=&#?\s"'<>]+)=([^&#?\s"'<>]+)/g;
 const EMBEDDED = [
-  { label: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, replace: () => REDACTED },
-  { label: "JSON Web Token", pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, replace: () => REDACTED },
+  { label: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, replace: () => REDACTED },
+  { label: "JSON Web Token", pattern: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, replace: () => REDACTED },
   { label: "bearer token", pattern: /\b(Bearer\s+)[A-Za-z0-9\-._~+/]{16,}=*/gi, replace: (_, prefix) => `${prefix}${REDACTED}` },
   { label: "AWS access key", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, replace: () => REDACTED },
   { label: "GitHub token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g, replace: () => REDACTED },
