@@ -62,6 +62,11 @@ function readBounded(request, maximum) {
   });
 }
 
+function isJsonMediaType(value) {
+  const type = (value ?? "").split(";")[0].trim().toLowerCase();
+  return type === "application/json" || (type.startsWith("application/") && type.endsWith("+json"));
+}
+
 function isJsonRequest(request) {
   return (request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase() === "application/json";
 }
@@ -149,7 +154,8 @@ async function replayRequest(request, response, url, engine) {
   }
   const result = prepared.response;
   try {
-    json(response, result.status, result.body, {
+    const recordedType = result.headers["content-type"];
+    send(response, result.status, isJsonMediaType(recordedType) ? recordedType : TYPES[".json"], JSON.stringify(result.body), {
       ...result.headers,
       "x-api-tapedeck-exchange": prepared.exchange.id,
       "x-api-tapedeck-delay-ms": String(result.delay.ms),

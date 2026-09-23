@@ -157,3 +157,15 @@ test("a client that disconnects during a delay does not consume the exchange", a
   assert.equal(state.activeDelay, null);
   assert.equal((await send("POST", "/replay/sessions", { body: { origin: "MEL", destination: "HBA" } })).status, 202);
 });
+
+test("replay keeps a recorded JSON content type and falls back to application/json otherwise", async (t) => {
+  const send = await start(t);
+  const raw = await fixture("published-cassette");
+  raw.exchanges[0].response.headers["content-type"] = "application/problem+json";
+  raw.exchanges[1].response.headers["content-type"] = "text/html";
+  assert.equal((await send("POST", "/api/replay/load", { body: { cassette: raw } })).status, 200);
+  const created = await send("POST", "/replay/sessions", { body: { origin: "MEL", destination: "HBA" } });
+  assert.equal(created.headers["content-type"], "application/problem+json");
+  const polled = await send("GET", "/replay/sessions/session-demo-001?attempt=1");
+  assert.equal(polled.headers["content-type"], "application/json; charset=utf-8");
+});
