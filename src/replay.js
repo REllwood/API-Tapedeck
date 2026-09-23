@@ -92,25 +92,33 @@ export class ReplayEngine {
     this.variables = Object.fromEntries(Object.entries(this.cassette.variables).map(([name, definition]) => [name, definition.value]));
   }
 
+  #nearest(request) {
+    const total = this.cassette.exchanges.length;
+    const distance = (index) => index >= this.cursor ? index - this.cursor : total + this.cursor - index;
+    const [nearest] = this.cassette.exchanges.map((exchange, index) => ({ exchange, index, comparison: compareExchange(exchange, request, this.variables) }))
+      .sort((left, right) => left.comparison.differences.length - right.comparison.differences.length || distance(left.index) - distance(right.index));
+    return nearest;
+  }
+
+  #mismatchReason(expected, nearest) {
+    const repeated = nearest?.comparison.matched && nearest.index < this.cursor;
+    if (!expected) return repeated ? "The cassette sequence is already complete and this request repeats an exchange that has already been replayed" : "The cassette sequence is already complete";
+    if (repeated) return "Request repeats an exchange that has already been replayed; reset the replay to run it again";
+    return nearest.comparison.matched ? "Request matches a later exchange and arrived out of order" : "Request does not match the expected exchange";
+  }
+
   prepare(request) {
     if (this.pending) return { ok: false, status: 409, diagnostic: { reason: "A deliberate replay delay is already active", cursor: this.cursor } };
     const expected = this.cassette.exchanges[this.cursor];
-    if (!expected) {
-      const diagnostic = { reason: "The cassette sequence is already complete", cursor: this.cursor, expectedExchange: null, nearest: null };
-      this.#history("unmatched", request, diagnostic);
-      return { ok: false, status: 409, diagnostic };
-    }
-    const comparison = compareExchange(expected, request, this.variables);
-    if (!comparison.matched) {
-      const candidates = this.cassette.exchanges.map((exchange, index) => ({ exchange, index, comparison: compareExchange(exchange, request, this.variables) }))
-        .sort((left, right) => left.comparison.differences.length - right.comparison.differences.length || left.index - right.index);
-      const nearest = candidates[0];
+    const comparison = expected ? compareExchange(expected, request, this.variables) : null;
+    if (!comparison?.matched) {
+      const nearest = this.#nearest(request);
       const diagnostic = {
-        reason: nearest.comparison.matched && nearest.index !== this.cursor ? "Request matches a later exchange and arrived out of order" : "Request does not match the expected exchange",
+        reason: this.#mismatchReason(expected, nearest),
         cursor: this.cursor,
-        expectedExchange: { id: expected.id, name: expected.name },
-        differences: comparison.differences,
-        nearest: { id: nearest.exchange.id, name: nearest.exchange.name, position: nearest.index + 1, differences: nearest.comparison.differences }
+        expectedExchange: expected ? { id: expected.id, name: expected.name } : null,
+        differences: comparison?.differences ?? [],
+        nearest: nearest ? { id: nearest.exchange.id, name: nearest.exchange.name, position: nearest.index + 1, differences: nearest.comparison.differences } : null
       };
       this.#history("unmatched", request, diagnostic);
       return { ok: false, status: 409, diagnostic };

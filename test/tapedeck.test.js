@@ -79,6 +79,32 @@ test("unmatched and out-of-order requests return field-level nearest diagnostics
   assert.ok(result.diagnostic.differences.some((difference) => difference.field === "method"));
 });
 
+test("retried exchanges are reported as repeats, not as out-of-order requests", async () => {
+  const engine = new ReplayEngine(parseCassette(await fixture("published-cassette")));
+  const inputs = [
+    request("POST", "/sessions", {}, { origin: "MEL", destination: "HBA" }, { "content-type": "application/json" }),
+    request("GET", "/sessions/session-demo-001", { attempt: "1" }),
+    request("GET", "/sessions/session-demo-001", { attempt: "2" })
+  ];
+  const first = engine.prepare(inputs[0]);
+  engine.commit(first.token, inputs[0]);
+  const retry = engine.prepare(inputs[0]);
+  assert.equal(retry.ok, false);
+  assert.match(retry.diagnostic.reason, /repeats an exchange that has already been replayed/);
+  assert.equal(retry.diagnostic.expectedExchange.id, "poll-search-one");
+  assert.equal(retry.diagnostic.nearest.position, 1);
+
+  for (const input of inputs.slice(1)) {
+    const prepared = engine.prepare(input);
+    engine.commit(prepared.token, input);
+  }
+  const afterEnd = engine.prepare(inputs[2]);
+  assert.match(afterEnd.diagnostic.reason, /already complete and this request repeats/);
+  assert.equal(afterEnd.diagnostic.expectedExchange, null);
+  assert.equal(afterEnd.diagnostic.nearest.position, 3);
+  assert.deepEqual(afterEnd.diagnostic.differences, []);
+});
+
 test("exact and subset comparisons remain deterministic", async () => {
   const cassette = parseCassette(await fixture("published-cassette"));
   const exchange = cassette.exchanges[0];
