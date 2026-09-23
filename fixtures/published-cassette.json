@@ -1,0 +1,40 @@
+{
+  "format": "api-tapedeck.cassette.v1",
+  "name": "Travel search with polling",
+  "description": "Reviewed safe replay of a synthetic travel-search journey.",
+  "variables": {
+    "sessionId": { "strategy": "fixed", "value": "session-demo-001", "description": "Deterministic replacement for the unstable session identifier." },
+    "generatedAt": { "strategy": "fixed", "value": "2026-07-24T00:00:00.000Z", "description": "Deterministic replacement for the observed clock value." }
+  },
+  "capturePolicy": {
+    "reviewed": true,
+    "retainedHosts": ["travel-api.example.test"],
+    "redactions": [
+      "exchange.create-search.request.body.token",
+      "exchange.create-search.request.headers.authorization",
+      "exchange.create-search.response.body.accessToken",
+      "exchange.create-search.response.headers.set-cookie",
+      "exchange.poll-search-one.request.headers.x-api-key"
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "create-search",
+      "name": "Create travel search",
+      "request": { "method": "POST", "path": "/sessions", "query": {}, "headers": { "content-type": "application/json" }, "body": { "origin": "MEL", "destination": "HBA" }, "match": { "query": "exact", "body": "subset" } },
+      "response": { "status": 202, "headers": { "content-type": "application/json" }, "body": { "sessionId": "{{sessionId}}", "status": "searching", "generatedAt": "{{generatedAt}}" }, "delay": { "mode": "recorded", "ms": 140 } }
+    },
+    {
+      "id": "poll-search-one",
+      "name": "Poll while search is running",
+      "request": { "method": "GET", "path": "/sessions/{{sessionId}}", "query": { "attempt": "1" }, "headers": {}, "body": null, "match": { "query": "exact", "body": "none" } },
+      "response": { "status": 200, "headers": { "content-type": "application/json" }, "body": { "sessionId": "{{sessionId}}", "status": "searching", "generatedAt": "{{generatedAt}}" }, "delay": { "mode": "recorded", "ms": 220 } }
+    },
+    {
+      "id": "poll-search-two",
+      "name": "Return priced itinerary",
+      "request": { "method": "GET", "path": "/sessions/{{sessionId}}", "query": { "attempt": "2" }, "headers": {}, "body": null, "match": { "query": "exact", "body": "none" } },
+      "response": { "status": 200, "headers": { "content-type": "application/json" }, "body": { "sessionId": "{{sessionId}}", "status": "ready", "generatedAt": "{{generatedAt}}", "itinerary": { "origin": "MEL", "destination": "HBA", "priceAud": 189 } }, "delay": { "mode": "recorded", "ms": 320 } }
+    }
+  ]
+}

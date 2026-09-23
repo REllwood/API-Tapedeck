@@ -1,0 +1,66 @@
+{
+  "format": "api-tapedeck.draft.v1",
+  "name": "Travel search with polling",
+  "description": "A safe synthetic recording that creates a search, polls twice and returns a priced itinerary.",
+  "upstreamHost": "travel-api.example.test",
+  "variableReplacements": [
+    { "name": "sessionId", "observed": "observed-session-94271", "replayValue": "session-demo-001", "description": "Unstable session identifier replaced with a deterministic replay value." },
+    { "name": "generatedAt", "observed": "2026-07-24T04:16:09.813Z", "replayValue": "2026-07-24T00:00:00.000Z", "description": "Observed clock value fixed for deterministic replay." }
+  ],
+  "exchanges": [
+    {
+      "id": "create-search",
+      "name": "Create travel search",
+      "durationMs": 140,
+      "match": { "query": "exact", "body": "subset" },
+      "request": {
+        "method": "POST",
+        "path": "/sessions",
+        "query": {},
+        "headers": { "content-type": "application/json", "authorization": "Bearer synthetic-recording-secret" },
+        "body": { "origin": "MEL", "destination": "HBA", "token": "synthetic-body-secret" }
+      },
+      "response": {
+        "status": 202,
+        "headers": { "content-type": "application/json", "set-cookie": "synthetic_session=remove-me" },
+        "body": { "sessionId": "observed-session-94271", "status": "searching", "generatedAt": "2026-07-24T04:16:09.813Z", "accessToken": "synthetic-response-secret" }
+      }
+    },
+    {
+      "id": "poll-search-one",
+      "name": "Poll while search is running",
+      "durationMs": 220,
+      "match": { "query": "exact", "body": "none" },
+      "request": {
+        "method": "GET",
+        "path": "/sessions/observed-session-94271",
+        "query": { "attempt": "1" },
+        "headers": { "x-api-key": "synthetic-api-key" },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": { "content-type": "application/json" },
+        "body": { "sessionId": "observed-session-94271", "status": "searching", "generatedAt": "2026-07-24T04:16:09.813Z" }
+      }
+    },
+    {
+      "id": "poll-search-two",
+      "name": "Return priced itinerary",
+      "durationMs": 320,
+      "match": { "query": "exact", "body": "none" },
+      "request": {
+        "method": "GET",
+        "path": "/sessions/observed-session-94271",
+        "query": { "attempt": "2" },
+        "headers": {},
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": { "content-type": "application/json" },
+        "body": { "sessionId": "observed-session-94271", "status": "ready", "generatedAt": "2026-07-24T04:16:09.813Z", "itinerary": { "origin": "MEL", "destination": "HBA", "priceAud": 189 } }
+      }
+    }
+  ]
+}

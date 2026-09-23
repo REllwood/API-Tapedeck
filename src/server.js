@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
+import { fileURLToPath } from "node:url";
+import process from "node:process";
+import { CassetteError, forbiddenHeaders, parseCassette } from "./cassette.js";
+import { sanitiseDraft } from "./ingest.js";
+import { ReplayEngine, waitForDelay } from "./replay.js";
+
+const PUBLIC = new Map([
+  ["/", new URL("../public/index.html", import.meta.url)],
+  ["/app.js", new URL("../public/app.js", import.meta.url)],
+  ["/styles.css", new URL("../public/styles.css", import.meta.url)]
+]);
+const DRAFT_URL = new URL("../fixtures/travel-search-draft.json", import.meta.url);
+const CASSETTE_URL = new URL("../fixtures/published-cassette.json", import.meta.url);
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
+
+function send(response, status, type, body, extraHeaders = {}) {
+  const content = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  response.writeHead(status, {
+    ...extraHeaders,
+    "content-type": type,
+    "content-length": content.length,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(content);
+}
+
+function json(response, status, value, extraHeaders = {}) {
+  send(response, status, TYPES[".json"], JSON.stringify(value), extraHeaders);
+}
+
+function readBounded(request, maximum) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let exceeded = false;
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      if (exceeded) return;
+      body += chunk;
+      if (Buffer.byteLength(body, "utf8") > maximum) {
+        exceeded = true;
+        body = "";
+      }
+    });
+    request.on("end", () => exceeded ? reject(new CassetteError(`Request body exceeds ${maximum} bytes`)) : resolve(body));
+    request.on("error", reject);
+  });
+}
+
+async function readJson(request, maximum = 1024 * 1024) {
+  const body = await readBounded(request, maximum);
+  try {
+    const value = JSON.parse(body || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("body must be an object");
+    return value;
+  } catch (error) {
+    throw new CassetteError(`Request is not valid JSON: ${error.message}`);
+  }
+}
+
+async function fixture(url) {
+  return JSON.parse(await readFile(url, "utf8"));
+}
+
+function safeIncomingHeaders(input) {
+  const output = {};
+  for (const [rawName, rawValue] of Object.entries(input)) {
+    const name = rawName.toLowerCase();
+    if (forbiddenHeaders.has(name) || typeof rawValue !== "string" || rawValue.length > 4_096) continue;
+    output[name] = rawValue;
+  }
+  return output;
+}
+
+async function replayRequest(request, response, url, engine) {
+  let body = null;
+  if (!["GET", "HEAD"].includes(request.method ?? "GET")) {
+    const raw = await readBounded(request, 128 * 1024);
+    if (raw.length > 0) {
+      if (!(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) throw new CassetteError("Version 0.1 replay accepts JSON request bodies only");
+      try { body = JSON.parse(raw); }
+      catch (error) { throw new CassetteError(`Replay body is not valid JSON: ${error.message}`); }
+    }
+  }
+  const query = {};
+  for (const [name, value] of url.searchParams) {
+    if (name.length > 160 || value.length > 2_048) throw new CassetteError("Replay query exceeds configured bounds");
+    if (name in query) throw new CassetteError(`Replay query contains duplicate field ${name}`);
+    query[name] = value;
+  }
+  const replayInput = {
+    method: request.method ?? "GET",
+    path: url.pathname.slice("/replay".length) || "/",
+    query,
+    headers: safeIncomingHeaders(request.headers),
+    body
+  };
+  const prepared = engine.prepare(replayInput);
+  if (!prepared.ok) {
+    json(response, prepared.status, { ok: false, error: "unmatched replay request", diagnostic: prepared.diagnostic, upstreamContacted: false });
+    return;
+  }
+  const controller = new AbortController();
+  request.once("aborted", () => controller.abort());
+  response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+  try {
+    await waitForDelay(prepared.response.delay.ms, controller.signal);
+    const result = engine.commit(prepared.token, replayInput);
+    json(response, result.status, result.body, {
+      ...result.headers,
+      "x-api-tapedeck-exchange": prepared.exchange.id,
+      "x-api-tapedeck-delay-ms": String(result.delay.ms),
+      "x-api-tapedeck-mode": "local-replay"
+    });
+  } catch (error) {
+    engine.cancel(prepared.token);
+    if (!response.writableEnded && !response.destroyed) json(response, 499, { ok: false, error: error.message, upstreamContacted: false });
+  }
+}
+
+export async function createTapedeckServer() {
+  const published = parseCassette(await fixture(CASSETTE_URL));
+  const engine = new ReplayEngine(published);
+  const server = createServer(async (request, response) => {
+    response.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    try {
+      if (request.method === "GET" && PUBLIC.has(url.pathname)) {
+        const file = PUBLIC.get(url.pathname);
+        const content = await readFile(file);
+        send(response, 200, TYPES[extname(fileURLToPath(file))], content);
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/fixtures/travel-search-draft.json") {
+        send(response, 200, TYPES[".json"], await readFile(DRAFT_URL));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/replay/state") {
+        json(response, 200, { ok: true, state: engine.snapshot() });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/sanitise") {
+        const body = await readJson(request);
+        json(response, 200, { ok: true, cassette: sanitiseDraft(body.draft ?? body) });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/replay/load") {
+        const body = await readJson(request);
+        const cassette = parseCassette(body.cassette ?? body);
+        if (!cassette.capturePolicy.reviewed) throw new CassetteError("Cassette must be explicitly marked reviewed before replay");
+        engine.load(cassette);
+        json(response, 200, { ok: true, state: engine.snapshot() });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/replay/reset") {
+        await readBounded(request, 1_024);
+        engine.reset();
+        json(response, 200, { ok: true, state: engine.snapshot() });
+        return;
+      }
+      if (url.pathname.startsWith("/replay/")) {
+        await replayRequest(request, response, url, engine);
+        return;
+      }
+      json(response, 404, { ok: false, error: "Route not found" });
+    } catch (error) {
+      if (!response.writableEnded) json(response, error instanceof CassetteError ? 400 : 500, { ok: false, error: error.message, upstreamContacted: false });
+    }
+  });
+  return server;
+}
+
+function parsePort(values) {
+  if (values.includes("--help") || values.includes("-h")) return null;
+  if (values.length === 0) return 4193;
+  if (values[0] !== "--port" || values.length !== 2 || !/^\d+$/.test(values[1])) throw new Error("Usage: npm start -- [--port 1-65535]");
+  const port = Number(values[1]);
+  if (port < 1 || port > 65535) throw new Error("Port must be from 1 to 65535");
+  return port;
+}
+
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    const port = parsePort(process.argv.slice(2));
+    if (port === null) process.stdout.write("API Tapedeck v0.1\nUsage: npm start -- [--port 1-65535]\nRuns a loopback-only reviewed-cassette replay workbench.\n");
+    else {
+      const server = await createTapedeckServer();
+      server.listen(port, "127.0.0.1", () => process.stdout.write(`API Tapedeck listening at http://127.0.0.1:${port}\n`));
+      server.on("error", (error) => {
+        process.stderr.write(`API Tapedeck: ${error.message}\n`);
+        process.exitCode = 2;
+      });
+    }
+  } catch (error) {
+    process.stderr.write(`API Tapedeck: ${error.message}\n`);
+    process.exitCode = 2;
+  }
+}

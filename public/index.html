@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Tapedeck</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Curated local API replay</p>
+      <h1>API Tapedeck</h1>
+    </div>
+    <dl class="routing">
+      <div><dt>Mode</dt><dd id="mode">Local replay</dd></div>
+      <div><dt>Destination</dt><dd>Loopback cassette</dd></div>
+      <div><dt>Upstream</dt><dd>Never contacted</dd></div>
+    </dl>
+  </header>
+
+  <section class="controls" aria-labelledby="workflow-heading">
+    <div>
+      <h2 id="workflow-heading">Draft to reviewed replay</h2>
+      <p>Load the synthetic recording, remove retained secrets, inspect the new cassette, then explicitly approve it for local replay.</p>
+    </div>
+    <div class="actions">
+      <button id="load-draft" type="button">Load safe recording</button>
+      <button id="sanitise" type="button" disabled>Sanitise and validate</button>
+      <button id="review" type="button" disabled>Confirm review and load replay</button>
+      <button id="run" class="primary" type="button">Replay full journey</button>
+      <button id="mismatch" type="button">Send deliberate mismatch</button>
+      <button id="cancel" type="button" hidden>Cancel current operation</button>
+    </div>
+  </section>
+
+  <div id="operation-status" class="operation-status" role="status" aria-live="polite">Ready. The built-in reviewed cassette is available locally.</div>
+
+  <main class="workbench">
+    <section class="tape-pane" aria-labelledby="tape-heading">
+      <div class="pane-heading"><span>01</span><h2 id="tape-heading">Cassette sequence</h2></div>
+      <p id="cassette-summary" class="supporting">Load and sanitise the draft to inspect its published sequence.</p>
+      <ol id="exchange-list" class="tape"><li class="empty">No curated cassette is displayed.</li></ol>
+    </section>
+
+    <section class="inspection-pane" aria-labelledby="inspection-heading">
+      <div class="pane-heading"><span>02</span><h2 id="inspection-heading">Review evidence</h2></div>
+      <div id="review-empty" class="empty">Redactions, variables and the selected exchange appear here.</div>
+      <div id="review-content" hidden>
+        <dl class="policy">
+          <div><dt>Review state</dt><dd id="review-state"></dd></div>
+          <div><dt>Retained host</dt><dd id="retained-host"></dd></div>
+          <div><dt>Removed fields</dt><dd id="redaction-count"></dd></div>
+        </dl>
+        <h3>Fixed replay variables</h3>
+        <ul id="variable-list"></ul>
+        <h3 id="selected-name">Selected exchange</h3>
+        <pre id="selected-exchange"></pre>
+      </div>
+    </section>
+
+    <section class="replay-pane" aria-labelledby="replay-heading">
+      <div class="pane-heading"><span>03</span><h2 id="replay-heading">Replay decisions</h2></div>
+      <p class="supporting">Matched responses include their deliberate delay. Misses show the expected exchange and nearest candidate.</p>
+      <ol id="journey-log" class="journey-log"><li class="empty">No requests in this browser session.</li></ol>
+      <details>
+        <summary>Latest raw diagnostic or response</summary>
+        <pre id="raw-result">No result.</pre>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    Version 0.1 neither records nor forwards traffic. TLS interception, certificate management and production proxying remain unimplemented roadmap work.
+  </footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

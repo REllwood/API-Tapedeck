@@ -1,0 +1,24 @@
+{
+  "name": "api-tapedeck",
+  "version": "0.1.0",
+  "description": "Record a real API conversation, clean it up and replay it as a dependable development scenario.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/REllwood/APITapedeck.git"
+  },
+  "homepage": "https://github.com/REllwood/APITapedeck#readme",
+  "bugs": {
+    "url": "https://github.com/REllwood/APITapedeck/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node scripts/check.mjs"
+  }
+}
