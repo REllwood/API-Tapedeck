@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { CassetteError, parseCassette } from "../src/cassette.js";
 import { sanitiseDraft } from "../src/ingest.js";
+import { isSecretName } from "../src/secrets.js";
 import { compareExchange, ReplayEngine, waitForDelay } from "../src/replay.js";
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`../fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -268,4 +269,20 @@ test("ingestion keeps meaningful request headers and drops transport noise", asy
   const raw = await fixture("published-cassette");
   raw.exchanges[0].request.headers.host = "travel-api.example.test";
   assert.throws(() => parseCassette(raw), /request\.headers\.host can never match/);
+});
+
+test("secret field detection works on whole words rather than substrings", async () => {
+  for (const name of ["token", "accessToken", "access_token", "x-auth-token", "x-csrf-token", "csrftoken", "client_secret", "AWS_SECRET_ACCESS_KEY", "password", "newPassword", "passwordHash", "api_key", "apiKey", "APIKey", "x-api-key", "privateKey", "set-cookie", "authorization", "credentials", "X-Amz-Credential", "X-Amz-Security-Token"]) {
+    assert.equal(isSecretName(name), true, name);
+  }
+  for (const name of ["tokensUsed", "max_tokens", "passwordlessEligible", "tokenizer", "secretary", "tokenType", "token_type", "tokenExpiresAt", "client_secret_expires_at", "passwordPolicy", "nextPageToken", "page_token", "nextToken", "continuationToken", "idempotencyKey", "key", "sessionId", "author"]) {
+    assert.equal(isSecretName(name), false, name);
+  }
+
+  const draft = await fixture("travel-search-draft");
+  Object.assign(draft.exchanges[2].response.body.itinerary, { tokensUsed: 12, passwordlessEligible: true, nextPageToken: "page-2" });
+  draft.exchanges[2].response.body.next = "https://travel-api.example.test/sessions?page_token=page-2&access_token=leak";
+  const itinerary = sanitiseDraft(draft).exchanges[2].response.body;
+  assert.deepEqual(itinerary.itinerary, { origin: "MEL", destination: "HBA", priceAud: 189, tokensUsed: 12, passwordlessEligible: true, nextPageToken: "page-2" });
+  assert.equal(itinerary.next, "https://travel-api.example.test/sessions?page_token=page-2&access_token=REDACTED");
 });
